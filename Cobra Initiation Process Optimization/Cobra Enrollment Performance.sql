@@ -1,92 +1,134 @@
-/* ============================================================
-   Project 2: COBRA Enrollment Performance Optimization
-   ============================================================ */
+/* ==========================================================
+   Project: COBRA Initiation-to-Election + Call Center Tracking
+   Objective: Measure notification timeliness, mail delays, 
+              portal adoption, and member inquiry patterns.
+   ========================================================== */
 
--- 1️⃣ Drop existing summary table if it exists
-DROP TABLE IF EXISTS dbo.COBRA_Performance_Summary;
+-- 1️⃣ Drop existing temp tables
+DROP TABLE IF EXISTS #COBRA_Summary;
+DROP TABLE IF EXISTS #COBRA_CallSummary;
 
--- 2️⃣ Create a unified performance summary table
+-- 2️⃣ Create unified summary from COBRA process data
 SELECT
-    E.Employer_ID,
-    
-    -- 🔹 Member Demographics & Key Dates
-    COUNT(DISTINCT E.Member_ID) AS Total_Eligible,
-    COUNT(DISTINCT EL.Member_ID) AS Total_Elected,
-    ROUND(100.0 * COUNT(DISTINCT EL.Member_ID) / NULLIF(COUNT(DISTINCT E.Member_ID), 0), 2) AS Election_Rate_Percent,
+    c.EmployerGroup,
+    c.MemberID,
+    c.MemberName,
+    c.QualifyingEventDate,
+    c.InitiationDate,
+    c.PacketSentDate,
+    c.ElectionReceivedDate,
+    c.PortalEnrollmentDate,
+    c.CommunicationChannel,   -- Mail or Portal
 
-    -- 🔹 Mailing Timeliness (Physical or Digital)
-    SUM(CASE 
-            WHEN DATEDIFF(DAY, E.Eligibility_Date, C.Packet_Generated_Date) <= 14 THEN 1 
-            ELSE 0 
-        END) AS OnTime_Mailings,
-    SUM(CASE 
-            WHEN DATEDIFF(DAY, E.Eligibility_Date, C.Packet_Generated_Date) > 14 THEN 1 
-            ELSE 0 
-        END) AS Late_Mailings,
-    ROUND(100.0 * SUM(CASE 
-            WHEN DATEDIFF(DAY, E.Eligibility_Date, C.Packet_Generated_Date) <= 14 THEN 1 
-            ELSE 0 END) / NULLIF(COUNT(DISTINCT E.Member_ID), 0), 2) AS OnTime_Mailing_Rate_Percent,
+    -- Timelines
+    DATEDIFF(DAY, c.QualifyingEventDate, c.InitiationDate) AS Days_To_Initiate,
+    DATEDIFF(DAY, c.InitiationDate, c.PacketSentDate) AS Days_To_Send_Packet,
+    DATEDIFF(DAY, c.PacketSentDate, c.ElectionReceivedDate) AS Days_To_Elect,
 
-    -- 🔹 Election Timeliness (Compliance Tracking)
-    ROUND(AVG(DATEDIFF(DAY, C.Initiation_Date, EL.Election_Date)), 2) AS Avg_Days_To_Elect,
-    SUM(CASE 
-            WHEN DATEDIFF(DAY, C.Initiation_Date, EL.Election_Date) > 44 THEN 1 
-            ELSE 0 
-        END) AS Non_Compliant_Cases,
-    ROUND(100.0 * SUM(CASE 
-            WHEN DATEDIFF(DAY, C.Initiation_Date, EL.Election_Date) <= 44 THEN 1 
-            ELSE 0 END) / NULLIF(COUNT(DISTINCT EL.Member_ID), 0), 2) AS Compliance_Rate_Percent,
+    -- Compliance
+    CASE 
+        WHEN DATEDIFF(DAY, c.QualifyingEventDate, c.PacketSentDate) > 44 THEN 'Late'
+        ELSE 'On Time'
+    END AS Notification_Status,
 
-    -- 🔹 Portal Adoption Metrics
-    COUNT(DISTINCT P.Member_ID) AS Portal_Registrations,
-    COUNT(DISTINCT CASE WHEN EL.Source = 'Portal' THEN EL.Member_ID END) AS Digital_Elections,
-    ROUND(100.0 * COUNT(DISTINCT P.Member_ID) / NULLIF(COUNT(DISTINCT E.Member_ID), 0), 2) AS Portal_Adoption_Rate_Percent,
-    ROUND(100.0 * COUNT(DISTINCT CASE WHEN EL.Source = 'Portal' THEN EL.Member_ID END) / NULLIF(COUNT(DISTINCT EL.Member_ID), 0), 2) AS Digital_Election_Rate_Percent,
+    -- Adoption Flags
+    CASE WHEN c.CommunicationChannel = 'Portal' THEN 1 ELSE 0 END AS Portal_Used_Flag,
+    CASE WHEN c.CommunicationChannel = 'Mail' THEN 1 ELSE 0 END AS Mail_Used_Flag,
 
-    -- 🔹 Call Center Impact Metrics
-    COUNT(DISTINCT CC.Call_ID) AS Total_Calls,
-    ROUND(1.0 * COUNT(DISTINCT CC.Call_ID) / NULLIF(COUNT(DISTINCT E.Member_ID), 0), 2) AS Calls_Per_Member,
-    ROUND(100.0 * COUNT(DISTINCT CASE WHEN EL.Source = 'Portal' THEN E.Member_ID END) / NULLIF(COUNT(DISTINCT CC.Member_ID), 0), 2) AS Digital_vs_Call_Ratio_Percent,
+    -- Adoption Timelines
+    CASE 
+        WHEN c.PortalEnrollmentDate IS NOT NULL THEN 
+             DATEDIFF(DAY, c.InitiationDate, c.PortalEnrollmentDate)
+        ELSE NULL
+    END AS Days_To_Adopt_Portal,
 
-    -- 🔹 Operational Averages for Dashboard KPIs
-    ROUND(AVG(DATEDIFF(DAY, E.Eligibility_Date, C.Packet_Generated_Date)), 2) AS Avg_Days_To_Mail,
-    ROUND(AVG(DATEDIFF(DAY, E.Eligibility_Date, C.Initiation_Date)), 2) AS Avg_Days_To_Initiate
+    -- Risk Indicators
+    CASE WHEN DATEDIFF(DAY, c.InitiationDate, c.PacketSentDate) > 7 THEN 1 ELSE 0 END AS Late_Mailing_Flag,
+    CASE WHEN c.ElectionReceivedDate IS NULL THEN 1 ELSE 0 END AS Missing_Election_Flag
 
-INTO dbo.COBRA_Performance_Summary
-FROM dbo.COBRA_Eligibility E
-LEFT JOIN dbo.COBRA_Packet_Log C 
-    ON E.Member_ID = C.Member_ID
-LEFT JOIN dbo.COBRA_Election EL 
-    ON E.Member_ID = EL.Member_ID
-LEFT JOIN dbo.Portal_User_Logins P 
-    ON E.Member_ID = P.Member_ID
-LEFT JOIN dbo.Call_Center_Contacts CC 
-    ON E.Member_ID = CC.Member_ID
-GROUP BY 
-    E.Employer_ID
-ORDER BY 
-    E.Employer_ID;
+INTO #COBRA_Summary
+FROM dbo.COBRA_Initiations AS c;
 
--- 3️⃣ Preview the unified summary output
+
+
+-- 3️⃣ Summarize Call Center Data (Inbound Calls Related to COBRA)
+-- Assume call log table: dbo.CallCenter_Logs
+-- Contains: MemberID, CallDate, CallReason, ResolutionStatus, CallDuration_Min
+
+SELECT
+    MemberID,
+    COUNT(*) AS Total_Calls,
+    SUM(CASE WHEN CallReason LIKE '%packet%' THEN 1 ELSE 0 END) AS Packet_Status_Inquiries,
+    SUM(CASE WHEN CallReason LIKE '%enrollment%' THEN 1 ELSE 0 END) AS Enrollment_Status_Inquiries,
+    SUM(CASE WHEN CallReason LIKE '%deadline%' THEN 1 ELSE 0 END) AS Deadline_Inquiries,
+    SUM(CASE WHEN CallReason LIKE '%portal%' THEN 1 ELSE 0 END) AS Portal_Support_Calls,
+    ROUND(AVG(CallDuration_Min), 2) AS Avg_Call_Duration_Min,
+    SUM(CASE WHEN ResolutionStatus = 'Escalated' THEN 1 ELSE 0 END) AS Escalated_Calls
+INTO #COBRA_CallSummary
+FROM dbo.CallCenter_Logs
+WHERE CallCategory = 'COBRA'
+GROUP BY MemberID;
+
+
+
+-- 4️⃣ Merge COBRA Workflow + Call Center Summary
+SELECT
+    c.EmployerGroup,
+    COUNT(DISTINCT c.MemberID) AS Total_Eligible_Members,
+
+    -- Portal Adoption
+    SUM(c.Portal_Used_Flag) AS Total_Portal_Enrollments,
+    ROUND(100.0 * SUM(c.Portal_Used_Flag) / NULLIF(COUNT(*),0), 2) AS Portal_Adoption_Rate_Percent,
+
+    -- Timeliness Metrics
+    ROUND(AVG(c.Days_To_Initiate), 2) AS Avg_Days_To_Initiate,
+    ROUND(AVG(c.Days_To_Send_Packet), 2) AS Avg_Days_To_Send_Packet,
+    ROUND(AVG(c.Days_To_Elect), 2) AS Avg_Days_To_Elect,
+    SUM(CASE WHEN c.Notification_Status = 'Late' THEN 1 ELSE 0 END) AS Total_Late_Notifications,
+
+    -- Risk Indicators
+    SUM(c.Late_Mailing_Flag) AS Total_Late_Mailings,
+    SUM(c.Missing_Election_Flag) AS Missing_Election_Count,
+
+    -- Call Center KPIs
+    COUNT(DISTINCT cs.MemberID) AS Members_Who_Called,
+    COALESCE(SUM(cs.Total_Calls), 0) AS Total_Calls_Received,
+    COALESCE(ROUND(AVG(cs.Total_Calls), 2), 0) AS Avg_Calls_Per_Member,
+    COALESCE(SUM(cs.Packet_Status_Inquiries), 0) AS Packet_Status_Calls,
+    COALESCE(SUM(cs.Enrollment_Status_Inquiries), 0) AS Enrollment_Status_Calls,
+    COALESCE(SUM(cs.Deadline_Inquiries), 0) AS Deadline_Calls,
+    COALESCE(SUM(cs.Portal_Support_Calls), 0) AS Portal_Help_Calls,
+    COALESCE(SUM(cs.Escalated_Calls), 0) AS Escalated_Calls,
+    COALESCE(ROUND(AVG(cs.Avg_Call_Duration_Min), 2), 0) AS Avg_Call_Duration_Min,
+
+    -- Derived Efficiency Metrics
+    ROUND(100.0 * SUM(CASE WHEN c.Notification_Status = 'On Time' THEN 1 ELSE 0 END) / COUNT(*), 2) AS Compliance_Rate_Percent,
+    ROUND(100.0 * COUNT(DISTINCT cs.MemberID) / COUNT(*), 2) AS Member_Call_Rate_Percent
+
+FROM #COBRA_Summary c
+LEFT JOIN #COBRA_CallSummary cs ON c.MemberID = cs.MemberID
+GROUP BY c.EmployerGroup
+ORDER BY c.EmployerGroup;
+
+
+
+-- 5️⃣ Optional: Member-Level Detail View
+-- Uncomment to review per-member operational & call insights
+/*
 SELECT 
-    Employer_ID,
-    Total_Eligible,
-    Total_Elected,
-    Election_Rate_Percent,
-    OnTime_Mailings,
-    Late_Mailings,
-    OnTime_Mailing_Rate_Percent,
-    Avg_Days_To_Elect,
-    Non_Compliant_Cases,
-    Compliance_Rate_Percent,
-    Portal_Registrations,
-    Digital_Elections,
-    Portal_Adoption_Rate_Percent,
-    Digital_Election_Rate_Percent,
-    Total_Calls,
-    Calls_Per_Member,
-    Digital_vs_Call_Ratio_Percent,
-    Avg_Days_To_Mail,
-    Avg_Days_To_Initiate
-FROM dbo.COBRA_Performance_Summary
-ORDER BY Employer_ID;
+    c.EmployerGroup,
+    c.MemberID,
+    c.MemberName,
+    c.Notification_Status,
+    c.Late_Mailing_Flag,
+    c.Missing_Election_Flag,
+    cs.Total_Calls,
+    cs.Packet_Status_Inquiries,
+    cs.Enrollment_Status_Inquiries,
+    cs.Deadline_Inquiries,
+    cs.Portal_Support_Calls
+FROM #COBRA_Summary c
+LEFT JOIN #COBRA_CallSummary cs ON c.MemberID = cs.MemberID
+ORDER BY c.EmployerGroup, c.MemberName;
+*/
+
