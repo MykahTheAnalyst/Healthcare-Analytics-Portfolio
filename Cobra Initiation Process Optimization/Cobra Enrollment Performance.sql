@@ -111,24 +111,3 @@ GROUP BY c.EmployerGroup
 ORDER BY c.EmployerGroup;
 
 
-
--- 5️⃣ Optional: Member-Level Detail View
--- Uncomment to review per-member operational & call insights
-/*
-SELECT 
-    c.EmployerGroup,
-    c.MemberID,
-    c.MemberName,
-    c.Notification_Status,
-    c.Late_Mailing_Flag,
-    c.Missing_Election_Flag,
-    cs.Total_Calls,
-    cs.Packet_Status_Inquiries,
-    cs.Enrollment_Status_Inquiries,
-    cs.Deadline_Inquiries,
-    cs.Portal_Support_Calls
-FROM #COBRA_Summary c
-LEFT JOIN #COBRA_CallSummary cs ON c.MemberID = cs.MemberID
-ORDER BY c.EmployerGroup, c.MemberName;
-*/
-
