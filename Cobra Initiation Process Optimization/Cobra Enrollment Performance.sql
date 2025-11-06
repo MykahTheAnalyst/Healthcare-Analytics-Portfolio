@@ -1,8 +1,4 @@
-/* ==========================================================
-   Project: COBRA Initiation-to-Election + Call Center Tracking
-   Objective: Measure notification timeliness, mail delays, 
-              portal adoption, and member inquiry patterns.
-   ========================================================== */
+   -- Project: COBRA Initiation-to-Election + Call Center Tracking
 
 -- 1️⃣ Drop existing temp tables
 DROP TABLE IF EXISTS #COBRA_Summary;
@@ -52,8 +48,6 @@ FROM dbo.COBRA_Initiations AS c;
 
 
 -- 3️⃣ Summarize Call Center Data (Inbound Calls Related to COBRA)
--- Assume call log table: dbo.CallCenter_Logs
--- Contains: MemberID, CallDate, CallReason, ResolutionStatus, CallDuration_Min
 
 SELECT
     MemberID,
