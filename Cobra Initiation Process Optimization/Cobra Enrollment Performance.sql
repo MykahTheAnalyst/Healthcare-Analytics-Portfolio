@@ -18,7 +18,7 @@ SELECT
     c.PacketSentDate,
     c.ElectionReceivedDate,
     c.PortalEnrollmentDate,
-    c.CommunicationChannel,   -- Mail or Portal
+    c.CommunicationChannel,  
 
     -- Timelines
     DATEDIFF(DAY, c.QualifyingEventDate, c.InitiationDate) AS Days_To_Initiate,
